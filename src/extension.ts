@@ -1,9 +1,13 @@
 import * as vscode from "vscode";
 import * as http from "http";
+import * as os from "os";
+import * as path from "path";
+import * as fs from "fs";
 
 let outputChannel: vscode.OutputChannel;
 let httpServer: http.Server | undefined;
 let serverPort: number = 3846; // Default port, will be overridden by config
+let portFilePath: string | undefined;
 
 /**
  * Extension activation - WITH HTTP SERVER
@@ -12,6 +16,12 @@ export function activate(context: vscode.ExtensionContext) {
   outputChannel = vscode.window.createOutputChannel("Diagnostics MCP Server");
   outputChannel.appendLine("✅ EXTENSION ACTIVATED!");
   outputChannel.show();
+
+  // Derive a stable port-file path based on the workspace root
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "default";
+  const workspaceId = Buffer.from(workspaceRoot).toString("base64").replace(/[/+=]/g, "_").slice(0, 32);
+  portFilePath = path.join(os.tmpdir(), `diagnostics-mcp-${workspaceId}.port`);
+  outputChannel.appendLine(`📁 Port file: ${portFilePath}`);
 
   // Read configuration
   const config = vscode.workspace.getConfiguration("diagnostics-mcp-server");
@@ -36,6 +46,8 @@ export function activate(context: vscode.ExtensionContext) {
     "diagnostics-mcp.start",
     () => {
       if (!httpServer || !httpServer.listening) {
+        // Re-read port from config so changes to settings.json take effect
+        serverPort = vscode.workspace.getConfiguration("diagnostics-mcp-server").get<number>("port", 3846);
         startHttpServer();
         vscode.window.showInformationMessage(
           `🚀 HTTP MCP Server started on port ${serverPort}`
@@ -95,6 +107,8 @@ export function activate(context: vscode.ExtensionContext) {
   const restartCommand = vscode.commands.registerCommand(
     "diagnostics-mcp.restart",
     () => {
+      // Always re-read port from config so settings.json changes take effect
+      serverPort = vscode.workspace.getConfiguration("diagnostics-mcp-server").get<number>("port", 3846);
       if (httpServer && httpServer.listening) {
         outputChannel.appendLine("🔄 Restarting HTTP MCP Server...");
         stopHttpServer();
@@ -209,6 +223,11 @@ function startHttpServer() {
       `   - Health: http://localhost:${serverPort}/health`
     );
     outputChannel.appendLine(`   - MCP: http://localhost:${serverPort}/mcp`);
+    // Write active port to temp file so external tools (proxy scripts) can discover it
+    if (portFilePath) {
+      fs.writeFileSync(portFilePath, String(serverPort), "utf8");
+      outputChannel.appendLine(`📝 Port written to ${portFilePath}`);
+    }
     vscode.window.showInformationMessage(
       `🚀 Diagnostics MCP Server running on http://localhost:${serverPort}`
     );
@@ -226,9 +245,13 @@ function startHttpServer() {
 function stopHttpServer() {
   if (httpServer && httpServer.listening) {
     httpServer.close(() => {
-      outputChannel.appendLine("� HTTP Server stopped");
+      outputChannel.appendLine("🛑 HTTP Server stopped");
     });
     httpServer = undefined;
+    // Remove the port file so external tools know the server is no longer running
+    if (portFilePath && fs.existsSync(portFilePath)) {
+      fs.unlinkSync(portFilePath);
+    }
   }
 }
 
