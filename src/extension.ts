@@ -5,6 +5,7 @@ import { DiagnosticsMCPServer } from "./mcp-server";
 
 let outputChannel: vscode.OutputChannel;
 let mcpServer: DiagnosticsMCPServer | undefined;
+let currentPort: number = 3846;
 let currentPipePath: string | undefined;
 
 /**
@@ -24,6 +25,15 @@ function getPipePath(workspaceRoot: string): string {
   return path.join(os.tmpdir(), `diagnostics-mcp-${id}.sock`);
 }
 
+function readConfig() {
+  const config = vscode.workspace.getConfiguration("diagnostics-mcp-server");
+  return {
+    autoStart: config.get<boolean>("autoStart", true),
+    port:      config.get<number>("port", 3846),
+    transport: config.get<string>("transport", "both"),
+  };
+}
+
 export function activate(context: vscode.ExtensionContext) {
   outputChannel = vscode.window.createOutputChannel("Diagnostics MCP Server");
   outputChannel.appendLine("✅ EXTENSION ACTIVATED!");
@@ -32,14 +42,17 @@ export function activate(context: vscode.ExtensionContext) {
   const workspaceRoot =
     vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "default";
   currentPipePath = getPipePath(workspaceRoot);
+
+  const { autoStart, port, transport } = readConfig();
+  currentPort = port;
+
+  outputChannel.appendLine(
+    `📋 Config — AutoStart: ${autoStart}, Port: ${port}, Transport: ${transport}`
+  );
   outputChannel.appendLine(`📁 Pipe path: ${currentPipePath}`);
 
-  const config = vscode.workspace.getConfiguration("diagnostics-mcp-server");
-  const autoStart = config.get<boolean>("autoStart", true);
-  outputChannel.appendLine(`📋 Config - AutoStart: ${autoStart}`);
-
   if (autoStart) {
-    startPipeServer();
+    startServers();
   } else {
     outputChannel.appendLine(
       "⏸️ AutoStart disabled — use 'Start MCP Server' command to start manually"
@@ -49,8 +62,9 @@ export function activate(context: vscode.ExtensionContext) {
   const startCommand = vscode.commands.registerCommand(
     "diagnostics-mcp.start",
     () => {
-      if (!mcpServer?.isListening) {
-        startPipeServer();
+      const running = mcpServer?.isHttpListening || mcpServer?.isPipeListening;
+      if (!running) {
+        startServers();
         vscode.window.showInformationMessage("🚀 Diagnostics MCP Server started");
       } else {
         vscode.window.showInformationMessage(
@@ -63,8 +77,8 @@ export function activate(context: vscode.ExtensionContext) {
   const stopCommand = vscode.commands.registerCommand(
     "diagnostics-mcp.stop",
     async () => {
-      if (mcpServer?.isListening) {
-        await stopPipeServer();
+      if (mcpServer?.isHttpListening || mcpServer?.isPipeListening) {
+        await stopServers();
         vscode.window.showInformationMessage("🛑 Diagnostics MCP Server stopped");
       } else {
         vscode.window.showInformationMessage(
@@ -77,11 +91,14 @@ export function activate(context: vscode.ExtensionContext) {
   const statusCommand = vscode.commands.registerCommand(
     "diagnostics-mcp.status",
     () => {
-      const running = mcpServer?.isListening ?? false;
-      vscode.window.showInformationMessage(
-        `Diagnostics MCP Server: ${running ? `RUNNING on ${currentPipePath}` : "STOPPED"}`,
-        { modal: true }
-      );
+      const lines: string[] = ["Diagnostics MCP Server Status:"];
+      if (mcpServer?.isHttpListening)
+        lines.push(`📡 HTTP:  http://localhost:${currentPort}/mcp`);
+      if (mcpServer?.isPipeListening)
+        lines.push(`🔌 Pipe: ${currentPipePath}`);
+      if (!mcpServer?.isHttpListening && !mcpServer?.isPipeListening)
+        lines.push("⚠️ Not running");
+      vscode.window.showInformationMessage(lines.join("\n"), { modal: true });
     }
   );
 
@@ -89,8 +106,8 @@ export function activate(context: vscode.ExtensionContext) {
     "diagnostics-mcp.restart",
     async () => {
       outputChannel.appendLine("🔄 Restarting Diagnostics MCP Server...");
-      await stopPipeServer();
-      startPipeServer();
+      await stopServers();
+      startServers();
       vscode.window.showInformationMessage("🔄 Diagnostics MCP Server restarted");
     }
   );
@@ -105,30 +122,52 @@ export function activate(context: vscode.ExtensionContext) {
   vscode.window.showInformationMessage("✅ Diagnostics MCP - ACTIVATED!");
 }
 
-function startPipeServer(): void {
-  if (!currentPipePath) return;
+function startServers(): void {
+  const { port, transport } = readConfig();
+  currentPort = port;
+
   mcpServer = new DiagnosticsMCPServer(outputChannel, {} as vscode.ExtensionContext);
-  mcpServer
-    .startPipe(currentPipePath)
-    .then(() => {
-      outputChannel.appendLine(`🚀 MCP Server listening on ${currentPipePath}`);
-      outputChannel.appendLine(`   Connect with: DIAGNOSTICS_MCP_WORKSPACE=<workspaceRoot>`);
-    })
-    .catch((err) => {
-      outputChannel.appendLine(`❌ Failed to start pipe server: ${err.message}`);
-      vscode.window.showErrorMessage(
-        `Diagnostics MCP: failed to start — ${err.message}`
-      );
-    });
+
+  if (transport === "http" || transport === "both") {
+    mcpServer
+      .startHttp(port)
+      .then(() => {
+        outputChannel.appendLine(`🚀 HTTP server started on http://localhost:${port}/mcp`);
+        vscode.window.showInformationMessage(
+          `🚀 Diagnostics MCP HTTP server running on port ${port}`
+        );
+      })
+      .catch((err) => {
+        outputChannel.appendLine(`❌ HTTP server failed: ${err.message}`);
+        vscode.window.showErrorMessage(
+          `Diagnostics MCP HTTP: ${err.message}`
+        );
+      });
+  }
+
+  if (transport === "pipe" || transport === "both") {
+    if (!currentPipePath) return;
+    mcpServer
+      .startPipe(currentPipePath)
+      .then(() => {
+        outputChannel.appendLine(`🚀 Pipe server started on ${currentPipePath}`);
+      })
+      .catch((err) => {
+        outputChannel.appendLine(`❌ Pipe server failed: ${err.message}`);
+        vscode.window.showErrorMessage(
+          `Diagnostics MCP pipe: ${err.message}`
+        );
+      });
+  }
 }
 
-async function stopPipeServer(): Promise<void> {
+async function stopServers(): Promise<void> {
   if (mcpServer) {
-    await mcpServer.stopPipe();
+    await mcpServer.stopAll();
     mcpServer = undefined;
   }
 }
 
 export function deactivate(): Thenable<void> {
-  return stopPipeServer();
+  return stopServers();
 }

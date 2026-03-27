@@ -1,6 +1,6 @@
 # Diagnostics MCP Server
 
-> **HTTP MCP server with 5 diagnostic tools providing real-time access to ALL VS Code diagnostics (TypeScript, ESLint, Prettier, and all installed extensions)**
+> **MCP server with 5 diagnostic tools providing real-time access to ALL VS Code diagnostics (TypeScript, ESLint, Prettier, and all installed extensions)**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Version](https://img.shields.io/badge/version-1.0.15-blue.svg)](https://github.com/Maaz0313-png/Diagnostics-MCP)
@@ -18,34 +18,36 @@ This Model Context Protocol (MCP) server provides AI agents with real-time acces
 
 ## ⚙️ Configuration
 
-The extension provides two configuration settings:
-
 ### `diagnostics-mcp-server.autoStart`
 
 - **Type**: `boolean`
 - **Default**: `true`
-- **Description**: Automatically start HTTP MCP server when VS Code opens
+- **Description**: Automatically start the MCP server(s) when VS Code opens
 
 **To disable auto-start:**
 
 1. Open VS Code Settings (Ctrl+,)
 2. Search for "diagnostics-mcp-server"
 3. Uncheck "Auto Start"
-4. Use the "Start HTTP MCP Server" command to start manually
+4. Use the "Start MCP Server" command to start manually
+
+### `diagnostics-mcp-server.transport`
+
+- **Type**: `string` — `"http"` | `"pipe"` | `"both"`
+- **Default**: `"both"`
+- **Description**: Which transport(s) to start
+
+| Value | Description |
+|-------|-------------|
+| `"http"` | HTTP server only (port-based, backward-compatible) |
+| `"pipe"` | Named pipe / Unix socket only (no port conflicts, stdio-friendly) |
+| `"both"` | Both transports simultaneously *(default)* |
 
 ### `diagnostics-mcp-server.port`
 
 - **Type**: `number`
 - **Default**: `3846`
-- **Description**: Port for HTTP MCP server
-
-**To change the port:**
-
-1. Open VS Code Settings (Ctrl+,)
-2. Search for "diagnostics-mcp-server.port"
-3. Set your desired port number
-4. Restart the server or reload VS Code
-5. Update your MCP client configuration with the new port
+- **Description**: Port for the HTTP MCP server (only used when transport is `"http"` or `"both"`)
 
 ## 📋 Installation
 
@@ -62,37 +64,48 @@ Install from VS Code Marketplace:
 
 ### Step 2: Extension Auto-Start
 
-The extension automatically starts the HTTP MCP server when VS Code opens. No additional setup required!
+The extension automatically starts when VS Code opens (if `autoStart` is enabled). No port configuration needed — it uses a workspace-scoped named pipe.
 
-**Server Details:**
+**Transport details:**
 
-- **Protocol**: HTTP with Server-Sent Events
-- **Port**: 3846 (automatically managed)
+- **Protocol**: Named pipe / Unix domain socket (no TCP port)
+- **Path**: Derived automatically from the workspace root — unique per VS Code instance
 - **Startup**: Automatic with VS Code
 
-### Step 3: Configure MCP Client
+### Step 3: Configure MCP Client — stdio transport (recommended)
 
-Add this to your MCP client configuration (e.g., Claude Desktop config or VS Code MCP settings):
+The preferred way to connect is via the bundled `stdio-bridge.js`, which requires no port and works across multiple simultaneous VS Code instances.
+
+Add this to your `.vscode/mcp.json` (or equivalent MCP client config):
 
 ```json
 {
-  "mcpServers": {
-    "diagnostics": {
-      "type": "http",
-      "url": "http://127.0.0.1:3846/mcp",
-      "description": "VS Code diagnostics - all 5 tools (errors, warnings, info, health, all diagnostics)"
+  "servers": {
+    "diagnostics-mcp-server": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "${userHome}/.vscode/extensions/maaz-tajammul.diagnostics-mcp-server-<version>/dist/stdio-bridge.js"
+      ],
+      "env": {
+        "DIAGNOSTICS_MCP_WORKSPACE": "${workspaceFolder}"
+      }
     }
   }
 }
 ```
 
+Replace `<version>` with the installed extension version (e.g. `1.0.15`).
+
+> **`${workspaceFolder}`** binds the bridge to the correct VS Code instance automatically.
+> When you have multiple VS Code windows open (e.g. different git worktrees), each
+> `mcp.json` entry connects to its own pipe — no conflicts, no manual port management.
+
 ### Verify Connection
 
-1. **Check server status**: Visit `http://127.0.0.1:3846/health`
-2. **View logs**: VS Code Output panel → "Diagnostics MCP Server"
-3. **Test connection**: Server automatically starts when VS Code opens
-
-**Available immediately after VS Code extension installation - no additional setup required!**
+1. **View logs**: VS Code Output panel → "Diagnostics MCP Server"
+2. **Check pipe path**: Logged on startup, e.g. `\\.\pipe\diagnostics-mcp-<id>` (Windows) or `/tmp/diagnostics-mcp-<id>.sock` (Unix)
+3. **Run a tool**: Ask your AI agent to call `get_workspace_health`
 
 ### Usage
 
@@ -106,21 +119,27 @@ Once configured, AI agents (like Claude, GitHub Copilot) can use these **5 MCP t
 
 ## 🔧 How It Works
 
-This extension uses an **HTTP MCP Server** architecture:
+The extension uses a **named pipe** (Windows) or **Unix domain socket** (macOS/Linux) instead of a TCP port. The pipe path is derived from the workspace root, so each VS Code window gets its own unique pipe — no port conflicts when you have multiple projects open simultaneously.
 
+```text
+┌──────────────────────────────────────────────────────────────┐
+│  AI Agent (Claude, GitHub Copilot, …)                        │
+│    ↕  MCP stdio protocol                                     │
+│  stdio-bridge.js  (node process, started by MCP client)      │
+│    ↕  byte-forward over named pipe / Unix socket             │
+│  VS Code Extension  (DiagnosticsMCPServer)                   │
+│    ↓                                                         │
+│  vscode.languages.getDiagnostics() API                       │
+│    ↓                                                         │
+│  ALL Diagnostics  (TS, ESLint, Prettier, all LSPs, …)        │
+└──────────────────────────────────────────────────────────────┘
 ```
-┌─────────────────────────────────────────────────────┐
-│  AI Agent (Claude, GitHub Copilot)                 │
-│  ↓                                                  │
-│  HTTP MCP Protocol (port 3846)                     │
-│  ↓                                                  │
-│  VS Code Extension (HTTP MCP Server)               │
-│  ↓                                                  │
-│  vscode.languages.getDiagnostics() API             │
-│  ↓                                                  │
-│  ALL Diagnostics (TS, ESLint, Prettier, etc.)     │
-└─────────────────────────────────────────────────────┘
-```
+
+**Why a named pipe instead of HTTP?**
+
+- No TCP port to configure or conflict with other instances
+- Each workspace gets a deterministic, unique pipe path — just set `DIAGNOSTICS_MCP_WORKSPACE` once
+- `stdio-bridge.js` is a pure byte-forwarder; no `mcp-proxy` dependency required
 
 **Why Extension Required?**
 
@@ -130,11 +149,12 @@ This extension uses an **HTTP MCP Server** architecture:
 
 ## 📦 What's Included
 
-- **HTTP MCP Server** - Runs on port 3846 with Server-Sent Events
-- **5 Diagnostic Tools** - Comprehensive workspace diagnostic access
-- **3 VS Code Commands** - Start/Stop/Status server control
-- **Real-time Updates** - Live diagnostic monitoring
-- **Health Scoring** - Workspace quality metrics (0-100)
+- **Named pipe MCP Server** — workspace-scoped, no port management
+- **`stdio-bridge.js`** — bundled bridge script, connects MCP clients directly via stdio
+- **5 Diagnostic Tools** — comprehensive workspace diagnostic access
+- **4 VS Code Commands** — Start/Stop/Restart/Status server control
+- **Real-time Updates** — live diagnostic monitoring
+- **Health Scoring** — workspace quality metrics (0-100)
 
 ## 🛠️ Development
 
@@ -264,23 +284,17 @@ Get workspace health score (0-100) based on diagnostics.
 Four commands available in Command Palette (Ctrl+Shift+P):
 
 1. **🚀 Diagnostics MCP: Start HTTP MCP Server**
-
    - Manually start the MCP server
    - Use if server didn't auto-start or autoStart is disabled
 
 2. **🛑 Diagnostics MCP: Stop HTTP MCP Server**
-
    - Stop the running MCP server
-   - Useful for troubleshooting
 
 3. **🔄 Diagnostics MCP: Restart HTTP MCP Server**
-
    - Restart the MCP server (stop + start)
-   - Use after changing configuration settings (port, etc.)
 
 4. **📊 Diagnostics MCP: MCP Server Status (5 Tools + Health)**
-   - View server status, current diagnostics count, and health score
-   - Quick health check of your workspace
+   - Shows whether the server is running and the pipe path it is listening on
 
 ## 🤝 Contributing
 
@@ -299,23 +313,24 @@ MIT License - see [LICENSE](LICENSE) file for details
 
 ### "MCP server not connecting"
 
-1. Check server status: Visit `http://127.0.0.1:3846/health`
-2. View logs: VS Code Output panel → "Diagnostics MCP Server"
-3. Restart server: Use command "Diagnostics MCP: Start HTTP MCP Server"
+1. View logs: VS Code Output panel → "Diagnostics MCP Server" — check the pipe path logged on startup
+2. Ensure `DIAGNOSTICS_MCP_WORKSPACE` in your `mcp.json` matches the folder VS Code has open
+3. Restart server: Command Palette → "Diagnostics MCP: Restart HTTP MCP Server"
 4. Reload VS Code window: Ctrl+Shift+P → "Reload Window"
 
-### "Port 3846 already in use"
+### "Could not connect to pipe … after 15s"
 
-1. Stop other applications using port 3846
-2. Or change port in VS Code settings: `diagnostics-mcp-server.port`
-3. Use "Restart HTTP MCP Server" command or reload VS Code
-4. Update your MCP client config with the new port
+The `stdio-bridge.js` could not reach the extension pipe:
+
+1. Confirm the extension is installed and active (Output panel → "Diagnostics MCP Server")
+2. If `autoStart` is disabled, run the "Start" command manually before connecting
+3. Check that `DIAGNOSTICS_MCP_WORKSPACE` points to the correct workspace root
 
 ### "No diagnostics returned"
 
 1. Open a workspace with code files
-2. Wait for language servers to initialize
-3. Check VS Code's Problems tab for diagnostics
+2. Wait for language servers to initialize (check VS Code's Problems tab)
+3. Call `get_workspace_health` — it returns `0` total if no diagnostics are loaded yet
 
 ## 📝 Version History
 
@@ -360,4 +375,4 @@ MIT License - see [LICENSE](LICENSE) file for details
 
 ---
 
-**Made with ❤️ by Maaz Tajammul**
+Made with ❤️ by Maaz Tajammul

@@ -78,6 +78,12 @@
           "type": "number",
           "default": 3846,
           "description": "Port for HTTP MCP server (default: 3846)"
+        },
+        "diagnostics-mcp-server.transport": {
+          "type": "string",
+          "enum": ["http", "pipe", "both"],
+          "default": "both",
+          "description": "Which transport(s) to start: 'http' (port-based, backward-compatible), 'pipe' (named pipe / Unix socket, no port conflicts), or 'both' (default)"
         }
       }
     },
