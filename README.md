@@ -5,31 +5,24 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Version](https://img.shields.io/badge/version-1.0.15-blue.svg)](https://github.com/Maaz0313-png/Diagnostics-MCP)
 
-## 🎯 Overview
+## Overview
 
 This Model Context Protocol (MCP) server provides AI agents with real-time access to all diagnostics from your VS Code workspace, including:
 
-- ✅ **TypeScript/JavaScript** errors and warnings
-- ✅ **ESLint** linting issues
-- ✅ **Prettier** formatting issues
-- ✅ **All Language Servers** (Python, Go, Rust, etc.)
-- ✅ **All VS Code Extensions** diagnostics
-- ✅ **Real-time updates** as you code
+- TypeScript/JavaScript errors and warnings
+- ESLint linting issues
+- Prettier formatting issues
+- All Language Servers (Python, Go, Rust, etc.)
+- All VS Code Extensions diagnostics
+- Real-time updates as you code
 
-## ⚙️ Configuration
+## Configuration
 
 ### `diagnostics-mcp-server.autoStart`
 
 - **Type**: `boolean`
 - **Default**: `true`
 - **Description**: Automatically start the MCP server(s) when VS Code opens
-
-**To disable auto-start:**
-
-1. Open VS Code Settings (Ctrl+,)
-2. Search for "diagnostics-mcp-server"
-3. Uncheck "Auto Start"
-4. Use the "Start MCP Server" command to start manually
 
 ### `diagnostics-mcp-server.transport`
 
@@ -38,7 +31,7 @@ This Model Context Protocol (MCP) server provides AI agents with real-time acces
 - **Description**: Which transport(s) to start
 
 | Value | Description |
-|-------|-------------|
+| ------- | ------------- |
 | `"http"` | HTTP server only (port-based, backward-compatible) |
 | `"pipe"` | Named pipe / Unix socket only (no port conflicts, stdio-friendly) |
 | `"both"` | Both transports simultaneously *(default)* |
@@ -49,7 +42,7 @@ This Model Context Protocol (MCP) server provides AI agents with real-time acces
 - **Default**: `3846`
 - **Description**: Port for the HTTP MCP server (only used when transport is `"http"` or `"both"`)
 
-## 📋 Installation
+## Installation
 
 ### Step 1: Install VS Code Extension
 
@@ -60,23 +53,25 @@ Install from VS Code Marketplace:
 3. Search for "Diagnostics MCP Server"
 4. Click Install
 
-**Latest Version: 1.0.12** - Complete HTTP MCP implementation with 5 diagnostic tools, enhanced error handling, and working commands
+Or install a local build:
+
+```bash
+code --install-extension diagnostics-mcp-server-1.0.15.vsix
+```
 
 ### Step 2: Extension Auto-Start
 
-The extension automatically starts when VS Code opens (if `autoStart` is enabled). No port configuration needed — it uses a workspace-scoped named pipe.
+The extension automatically starts when VS Code opens (if `autoStart` is enabled). The pipe path is logged in the Output panel under "Diagnostics MCP Server".
 
-**Transport details:**
+### Step 3: Configure Your MCP Client
 
-- **Protocol**: Named pipe / Unix domain socket (no TCP port)
-- **Path**: Derived automatically from the workspace root — unique per VS Code instance
-- **Startup**: Automatic with VS Code
+The preferred transport is **stdio** via the bundled `stdio-bridge.js`. The bridge auto-discovers the correct named pipe for your workspace — no port configuration needed.
 
-### Step 3: Configure MCP Client — stdio transport (recommended)
+---
 
-The preferred way to connect is via the bundled `stdio-bridge.js`, which requires no port and works across multiple simultaneous VS Code instances.
+#### GitHub Copilot / VS Code (`.vscode/mcp.json`)
 
-Add this to your `.vscode/mcp.json` (or equivalent MCP client config):
+VS Code substitutes `${env:USERPROFILE}` and `${workspaceFolder}`:
 
 ```json
 {
@@ -85,7 +80,7 @@ Add this to your `.vscode/mcp.json` (or equivalent MCP client config):
       "type": "stdio",
       "command": "node",
       "args": [
-        "${userHome}/.vscode/extensions/maaz-tajammul.diagnostics-mcp-server-<version>/dist/stdio-bridge.js"
+        "${env:USERPROFILE}/.vscode/extensions/maaz-tajammul.diagnostics-mcp-server-1.0.15/dist/stdio-bridge.js"
       ],
       "env": {
         "DIAGNOSTICS_MCP_WORKSPACE": "${workspaceFolder}"
@@ -95,11 +90,32 @@ Add this to your `.vscode/mcp.json` (or equivalent MCP client config):
 }
 ```
 
-Replace `<version>` with the installed extension version (e.g. `1.0.15`).
+---
 
-> **`${workspaceFolder}`** binds the bridge to the correct VS Code instance automatically.
-> When you have multiple VS Code windows open (e.g. different git worktrees), each
-> `mcp.json` entry connects to its own pipe — no conflicts, no manual port management.
+#### Claude Code (`.mcp.json`)
+
+Claude Code uses `${VARNAME}` syntax (not `${env:VARNAME}`). The bridge falls back to `process.cwd()` if the workspace env var is not set:
+
+```json
+{
+  "mcpServers": {
+    "diagnostics-mcp-server": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "${USERPROFILE}/.vscode/extensions/maaz-tajammul.diagnostics-mcp-server-1.0.15/dist/stdio-bridge.js"
+      ],
+      "env": {
+        "DIAGNOSTICS_MCP_WORKSPACE": "${workspaceFolder}"
+      }
+    }
+  }
+}
+```
+
+> **Note**: Claude Code does not substitute `${workspaceFolder}`, so the bridge falls back to `process.cwd()` automatically. Claude Code must be launched from the workspace root for this to work correctly.
+
+---
 
 ### Verify Connection
 
@@ -107,23 +123,13 @@ Replace `<version>` with the installed extension version (e.g. `1.0.15`).
 2. **Check pipe path**: Logged on startup, e.g. `\\.\pipe\diagnostics-mcp-<id>` (Windows) or `/tmp/diagnostics-mcp-<id>.sock` (Unix)
 3. **Run a tool**: Ask your AI agent to call `get_workspace_health`
 
-### Usage
-
-Once configured, AI agents (like Claude, GitHub Copilot) can use these **5 MCP tools**:
-
-1. **`get_all_diagnostics`** - Get complete diagnostic information from workspace
-2. **`get_errors`** - Get only error-level diagnostics
-3. **`get_warnings`** - Get only warning-level diagnostics
-4. **`get_info`** - Get only info-level diagnostics
-5. **`get_workspace_health`** - Get workspace health score (0-100)
-
-## 🔧 How It Works
+## How It Works
 
 The extension uses a **named pipe** (Windows) or **Unix domain socket** (macOS/Linux) instead of a TCP port. The pipe path is derived from the workspace root, so each VS Code window gets its own unique pipe — no port conflicts when you have multiple projects open simultaneously.
 
 ```text
 ┌──────────────────────────────────────────────────────────────┐
-│  AI Agent (Claude, GitHub Copilot, …)                        │
+│  AI Agent (Claude Code, GitHub Copilot, …)                   │
 │    ↕  MCP stdio protocol                                     │
 │  stdio-bridge.js  (node process, started by MCP client)      │
 │    ↕  byte-forward over named pipe / Unix socket             │
@@ -135,55 +141,13 @@ The extension uses a **named pipe** (Windows) or **Unix domain socket** (macOS/L
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**Why a named pipe instead of HTTP?**
+The HTTP transport (port-based) is also available for backward compatibility with clients that don't support stdio.
 
-- No TCP port to configure or conflict with other instances
-- Each workspace gets a deterministic, unique pipe path — just set `DIAGNOSTICS_MCP_WORKSPACE` once
-- `stdio-bridge.js` is a pure byte-forwarder; no `mcp-proxy` dependency required
+## MCP Tools
 
-**Why Extension Required?**
+### `get_all_diagnostics`
 
-- VS Code diagnostics are only accessible inside VS Code via the `vscode` module
-- The extension provides the bridge between VS Code APIs and the MCP server
-- This ensures you get **ALL** diagnostics from **ALL** sources, not just TypeScript
-
-## 📦 What's Included
-
-- **Named pipe MCP Server** — workspace-scoped, no port management
-- **`stdio-bridge.js`** — bundled bridge script, connects MCP clients directly via stdio
-- **5 Diagnostic Tools** — comprehensive workspace diagnostic access
-- **4 VS Code Commands** — Start/Stop/Restart/Status server control
-- **Real-time Updates** — live diagnostic monitoring
-- **Health Scoring** — workspace quality metrics (0-100)
-
-## 🛠️ Development
-
-### Build from Source
-
-```bash
-git clone https://github.com/Maaz0313-png/Diagnostics-MCP.git
-cd "Diagnostics MCP"
-npm install
-npm run compile
-```
-
-### Test Locally
-
-```bash
-# Test the launcher
-node index.js --help
-
-# Test with a workspace
-node index.js
-```
-
-## 📖 API Reference - 5 MCP Tools
-
-### 1. Tool: `get_all_diagnostics`
-
-Get complete diagnostic information from workspace.
-
-**Returns:**
+Get all diagnostics from all files in the workspace.
 
 ```json
 {
@@ -197,182 +161,138 @@ Get complete diagnostic information from workspace.
       "message": "Type 'string' is not assignable to type 'number'",
       "source": "ts"
     }
-  ],
-  "status": "found",
-  "timestamp": "2025-10-02T10:30:00.000Z"
+  ]
 }
 ```
 
-### 2. Tool: `get_errors`
+### `get_file_diagnostics`
 
-Get only error-level diagnostics.
+Get diagnostics for a specific file path.
 
-**Returns:**
+**Input**: `{ "filePath": "/absolute/path/to/file.ts" }`
+
+### `get_diagnostics_by_severity`
+
+Get diagnostics filtered by severity level.
+
+**Input**: `{ "severity": "error" | "warning" | "information" | "hint" }`
+
+### `get_diagnostics_summary`
+
+Get a summary of diagnostic counts by severity.
 
 ```json
 {
-  "count": 5,
-  "diagnostics": [...],
-  "severityLevel": "errors",
-  "status": "found",
-  "timestamp": "2025-10-02T10:30:00.000Z"
+  "error": 2,
+  "warning": 5,
+  "information": 1,
+  "hint": 0,
+  "total": 8,
+  "filesWithIssues": 3
 }
 ```
 
-### 3. Tool: `get_warnings`
+### `get_workspace_health`
 
-Get only warning-level diagnostics.
-
-**Returns:**
-
-```json
-{
-  "count": 3,
-  "diagnostics": [...],
-  "severityLevel": "warnings",
-  "status": "found",
-  "timestamp": "2025-10-02T10:30:00.000Z"
-}
-```
-
-### 4. Tool: `get_info`
-
-Get only info-level diagnostics.
-
-**Returns:**
-
-```json
-{
-  "count": 2,
-  "diagnostics": [...],
-  "severityLevel": "info",
-  "status": "found",
-  "timestamp": "2025-10-02T10:30:00.000Z"
-}
-```
-
-### 5. Tool: `get_workspace_health`
-
-Get workspace health score (0-100) based on diagnostics.
-
-**Returns:**
+Get overall workspace health score (0–100) based on diagnostics.
 
 ```json
 {
   "healthScore": 85,
   "status": "good",
-  "summary": {
-    "errors": 2,
-    "warnings": 5,
-    "infos": 3,
-    "total": 10
-  },
-  "timestamp": "2025-10-02T10:30:00.000Z"
+  "breakdown": { "errors": 2, "warnings": 5, "information": 1, "hint": 0 },
+  "recommendation": "Good progress! Consider addressing remaining warnings"
 }
 ```
 
-**Health Score Calculation:**
+**Health score**: errors cost 10 pts each, warnings 3, information 1, hints 0.5.
+**Status**: `excellent` (90+), `good` (70+), `fair` (50+), `poor` (30+), `critical` (<30).
 
-- Errors: -10 points each
-- Warnings: -3 points each
-- Info: -1 point each
-- Scale: 0-100 (100 = perfect health)
-- Status: excellent (90+), good (70+), fair (50+), poor (<50)
+## VS Code Commands
 
-## 🎮 VS Code Commands
+Available in Command Palette (Ctrl+Shift+P) under "Diagnostics MCP":
 
-Four commands available in Command Palette (Ctrl+Shift+P):
+| Command | Description |
+| --------- | ------------- |
+| **Start MCP Server** | Manually start the server (if autoStart is off) |
+| **Stop MCP Server** | Stop the running server |
+| **Restart MCP Server** | Stop then start (re-reads config) |
+| **MCP Server Status** | Show running state and pipe/port info |
 
-1. **🚀 Diagnostics MCP: Start HTTP MCP Server**
-   - Manually start the MCP server
-   - Use if server didn't auto-start or autoStart is disabled
+## Build from Source
 
-2. **🛑 Diagnostics MCP: Stop HTTP MCP Server**
-   - Stop the running MCP server
+```bash
+git clone https://github.com/Maaz0313-png/Diagnostics-MCP.git
+cd Diagnostics-MCP
+npm install
+npm run bundle        # esbuild — bundles all dependencies into dist/
+npx vsce package --no-dependencies
+code --install-extension diagnostics-mcp-server-*.vsix
+```
 
-3. **🔄 Diagnostics MCP: Restart HTTP MCP Server**
-   - Restart the MCP server (stop + start)
+## Troubleshooting
 
-4. **📊 Diagnostics MCP: MCP Server Status (5 Tools + Health)**
-   - Shows whether the server is running and the pipe path it is listening on
+### "Cannot find module … stdio-bridge.js"
 
-## 🤝 Contributing
+The path substitution failed. Check which MCP client you are using:
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+- **VS Code / GitHub Copilot**: use `${env:USERPROFILE}` in `.vscode/mcp.json`
+- **Claude Code**: use `${USERPROFILE}` (no `env:`) in `.mcp.json`
 
-## 📄 License
+### "MCP error -32000: Connection closed"
 
-MIT License - see [LICENSE](LICENSE) file for details
-
-## 🔗 Links
-
-- [GitHub Repository](https://github.com/Maaz0313-png/Diagnostics-MCP)
-- [Model Context Protocol](https://modelcontextprotocol.io)
-
-## ⚠️ Troubleshooting
-
-### "MCP server not connecting"
-
-1. View logs: VS Code Output panel → "Diagnostics MCP Server" — check the pipe path logged on startup
-2. Ensure `DIAGNOSTICS_MCP_WORKSPACE` in your `mcp.json` matches the folder VS Code has open
-3. Restart server: Command Palette → "Diagnostics MCP: Restart HTTP MCP Server"
-4. Reload VS Code window: Ctrl+Shift+P → "Reload Window"
+1. Check Output panel → "Diagnostics MCP Server" for the pipe path
+2. Ensure `transport` is `"pipe"` or `"both"` (not `"http"` only)
+3. Reload VS Code window after installing a new extension version
+4. Restart the server via Command Palette → "Diagnostics MCP: Restart MCP Server"
 
 ### "Could not connect to pipe … after 15s"
 
-The `stdio-bridge.js` could not reach the extension pipe:
-
-1. Confirm the extension is installed and active (Output panel → "Diagnostics MCP Server")
-2. If `autoStart` is disabled, run the "Start" command manually before connecting
-3. Check that `DIAGNOSTICS_MCP_WORKSPACE` points to the correct workspace root
+1. Confirm the extension is active (Output panel → "Diagnostics MCP Server")
+2. If `autoStart` is disabled, run "Start MCP Server" manually before connecting
+3. Verify the workspace path — on Windows, drive letter case matters; the bridge normalizes to lowercase automatically
 
 ### "No diagnostics returned"
 
 1. Open a workspace with code files
 2. Wait for language servers to initialize (check VS Code's Problems tab)
-3. Call `get_workspace_health` — it returns `0` total if no diagnostics are loaded yet
+3. Call `get_diagnostics_summary` — returns zeros if no diagnostics are loaded yet
 
-## 📝 Version History
+## Version History
 
-### 1.0.14 (Current)
+### 1.0.15
 
-- ✅ Configuration settings support (autoStart, port)
-- ✅ Restart command for easy server restart
-- ✅ Configurable port number
-- ✅ Optional auto-start disable
+- Named pipe transport (workspace-scoped, no port conflicts)
+- `stdio-bridge.js` bundled — no `mcp-proxy` dependency
+- `transport` config: `"http"` | `"pipe"` | `"both"`
+- Drive letter case normalization on Windows for reliable pipe path matching
+- `process.cwd()` fallback in stdio-bridge for Claude Code compatibility
+- Renamed commands: removed "HTTP" from command titles
+- esbuild bundling — all dependencies included, no missing module errors
 
-### 1.0.12-1.0.13
+### 1.0.14
 
-- ✅ Complete HTTP MCP server implementation
-- ✅ 5 specialized diagnostic tools
-- ✅ Enhanced error handling and connection stability
-- ✅ Working VS Code commands (Start/Stop/Status)
-- ✅ Comprehensive tool documentation in metadata
-- ✅ Beautiful diagnostic icon
-- ✅ Full workspace health scoring
+- Configuration settings support (autoStart, port)
+- Restart command
+- Configurable port number
 
-### 1.0.11
+### 1.0.12–1.0.13
 
-- ✅ Enhanced connection stability for empty diagnostics
-- ✅ HTTP transport implementation
+- Complete HTTP MCP server implementation
+- 5 specialized diagnostic tools
+- VS Code commands (Start/Stop/Status)
+- Workspace health scoring
 
-### 1.0.10
+### 1.0.0
 
-- ✅ Added severity-specific tools (get_errors, get_warnings, get_info)
+- Initial release
+- Basic VS Code diagnostics integration
 
-### 1.0.0 (Initial Release)
+## License
 
-- ✅ Basic VS Code diagnostics integration
-- ✅ Support for all language servers and extensions
+MIT — see [LICENSE](LICENSE)
 
-## 💡 Use Cases
+## Links
 
-- **AI-Powered Code Review**: Let AI agents analyze all code issues
-- **Automated Quality Checks**: Monitor workspace health in real-time
-- **Smart Refactoring**: AI can see all diagnostics before suggesting changes
-- **Learning Assistant**: Help users understand and fix code issues
-- **CI/CD Integration**: Pre-commit diagnostic analysis
-
----
-
-Made with ❤️ by Maaz Tajammul
+- [GitHub Repository](https://github.com/Maaz0313-png/Diagnostics-MCP)
+- [Model Context Protocol](https://modelcontextprotocol.io)

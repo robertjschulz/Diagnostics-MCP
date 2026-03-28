@@ -15,7 +15,9 @@ let currentPipePath: string | undefined;
  * Unix    : <tmpdir>/diagnostics-mcp-<id>.sock
  */
 function getPipePath(workspaceRoot: string): string {
-  const id = Buffer.from(workspaceRoot)
+  // Normalize drive letter to lowercase on Windows so bridge and extension agree on the pipe name.
+  const normalized = process.platform === "win32" ? workspaceRoot.toLowerCase() : workspaceRoot;
+  const id = Buffer.from(normalized)
     .toString("base64")
     .replace(/[/+=]/g, "_")
     .slice(0, 32);

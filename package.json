@@ -47,12 +47,12 @@
     "commands": [
       {
         "command": "diagnostics-mcp.start",
-        "title": "🚀 Start HTTP MCP Server (Port 3846)",
+        "title": "🚀 Start MCP Server",
         "category": "Diagnostics MCP"
       },
       {
         "command": "diagnostics-mcp.stop",
-        "title": "🛑 Stop HTTP MCP Server",
+        "title": "🛑 Stop MCP Server",
         "category": "Diagnostics MCP"
       },
       {
@@ -62,7 +62,7 @@
       },
       {
         "command": "diagnostics-mcp.restart",
-        "title": "🔄 Restart HTTP MCP Server",
+        "title": "🔄 Restart MCP Server",
         "category": "Diagnostics MCP"
       }
     ],
@@ -81,7 +81,11 @@
         },
         "diagnostics-mcp-server.transport": {
           "type": "string",
-          "enum": ["http", "pipe", "both"],
+          "enum": [
+            "http",
+            "pipe",
+            "both"
+          ],
           "default": "both",
           "description": "Which transport(s) to start: 'http' (port-based, backward-compatible), 'pipe' (named pipe / Unix socket, no port conflicts), or 'both' (default)"
         }
@@ -119,8 +123,11 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run bundle",
     "compile": "tsc -p ./",
+    "bundle": "npm run bundle:extension && npm run bundle:bridge",
+    "bundle:extension": "esbuild src/extension.ts src/mcp-server.ts --bundle --outdir=dist --platform=node --external:vscode --format=cjs --sourcemap",
+    "bundle:bridge": "esbuild src/stdio-bridge.ts --bundle --outfile=dist/stdio-bridge.js --platform=node --format=cjs --sourcemap",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts",
     "package": "vsce package"
@@ -140,6 +147,7 @@
     "@typescript-eslint/eslint-plugin": "^8.x",
     "@typescript-eslint/parser": "^8.x",
     "@vscode/vsce": "^3.6.2",
+    "esbuild": "^0.27.4",
     "eslint": "^9.x"
   },
   "dependencies": {
